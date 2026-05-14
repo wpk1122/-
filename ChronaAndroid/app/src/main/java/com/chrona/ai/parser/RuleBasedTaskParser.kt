@@ -22,7 +22,8 @@ class RuleBasedTaskParser(
 
     private fun parseSegment(segment: String): ParsedTask {
         val date = detectDate(segment)
-        val time = detectExplicitTime(segment) ?: detectDefaultTime(segment)
+        val explicitTime = detectExplicitTime(segment)
+        val time = explicitTime ?: if (hasExplicitTime(segment)) null else detectDefaultTime(segment)
         val startAt = if (date != null && time != null) LocalDateTime.of(date, time) else null
         val durationHours = if (segment.contains("报告") || segment.contains("写")) 2L else 1L
         val endAt = startAt?.plusHours(durationHours)
@@ -30,8 +31,10 @@ class RuleBasedTaskParser(
         val needsTimeConfirmation = startAt == null
         val confidenceNote = if (needsTimeConfirmation) {
             "无法确定日期或时间，需要用户确认。"
+        } else if (explicitTime != null) {
+            "基于明确时间解析。"
         } else {
-            "基于本地规则解析。"
+            "基于默认时间规则解析。"
         }
 
         return ParsedTask(
@@ -65,7 +68,7 @@ class RuleBasedTaskParser(
         colonTime.find(segment)?.let { match ->
             val hour = match.groupValues[1].toIntOrNull() ?: return null
             val minute = match.groupValues[2].toIntOrNull() ?: return null
-            return LocalTime.of(hour, minute)
+            return validTimeOrNull(hour, minute)
         }
 
         chineseHour.find(segment)?.let { match ->
@@ -74,10 +77,24 @@ class RuleBasedTaskParser(
             if ((period == "下午" || period == "晚上" || period == "今晚") && hour in 1..11) {
                 hour += 12
             }
-            return LocalTime.of(hour, 0)
+            if (period == "中午" && hour in 1..10) {
+                hour += 12
+            }
+            return validTimeOrNull(hour, 0)
         }
 
         return null
+    }
+
+    private fun hasExplicitTime(segment: String): Boolean {
+        return colonTime.containsMatchIn(segment) || chineseHour.containsMatchIn(segment)
+    }
+
+    private fun validTimeOrNull(hour: Int, minute: Int): LocalTime? {
+        if (hour !in 0..23 || minute !in 0..59) {
+            return null
+        }
+        return LocalTime.of(hour, minute)
     }
 
     private fun detectDefaultTime(segment: String): LocalTime? {
@@ -95,11 +112,12 @@ class RuleBasedTaskParser(
 
     private fun cleanTitle(segment: String): String {
         return segment
-            .replace(reminderTerms, "")
+            .replace(leadingCommandTerms, "")
             .replace(dateTerms, "")
             .replace(colonTime, "")
             .replace(chineseHour, "")
             .replace(timeOfDayTerms, "")
+            .replace(leadingCommandTerms, "")
             .trim()
     }
 
@@ -107,7 +125,7 @@ class RuleBasedTaskParser(
         private val segmentSeparator = Regex("[,，、;；\\n]+|然后")
         private val colonTime = Regex("""(\d{1,2})[:：](\d{2})""")
         private val chineseHour = Regex("""(上午|早上|中午|下午|晚上|今晚)?(\d{1,2})点""")
-        private val reminderTerms = Regex("""提醒我|提醒|请|帮我""")
+        private val leadingCommandTerms = Regex("""^\s*(提醒我|提醒|帮我|记得)""")
         private val dateTerms = Regex("""后天|明天|今天|今晚|周末|周六|星期六|周日|星期日|星期天""")
         private val timeOfDayTerms = Regex("""早上|上午|中午|下午|晚上""")
     }
