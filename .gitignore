@@ -1,2 +1,10 @@
 .worktrees
 .worktrees/
+.tools/
+.superpowers/
+ChronaAndroid/.gradle/
+ChronaAndroid/build/
+ChronaAndroid/app/build/
+ChronaAndroid/local.properties
+*.iml
+.idea/
