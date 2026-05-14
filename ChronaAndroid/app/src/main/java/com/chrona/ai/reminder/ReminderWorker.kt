@@ -3,7 +3,9 @@ package com.chrona.ai.reminder
 import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
@@ -19,6 +21,8 @@ class ReminderWorker(
 ) : CoroutineWorker(appContext, workerParams) {
     override suspend fun doWork(): Result {
         val taskId = inputData.getLong(KEY_TASK_ID, -1L)
+        if (!ReminderNotification.isValidTaskId(taskId)) return Result.failure()
+
         val title = inputData.getString(KEY_TITLE) ?: return Result.failure()
 
         createNotificationChannel()
@@ -27,17 +31,18 @@ class ReminderWorker(
             return Result.success()
         }
 
-        val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
+        val notificationBuilder = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("Chrona 提醒")
             .setContentText(title)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setAutoCancel(true)
-            .build()
+
+        createContentIntent(taskId)?.let(notificationBuilder::setContentIntent)
 
         return try {
             NotificationManagerCompat.from(applicationContext)
-                .notify(notificationId(taskId), notification)
+                .notify(notificationId(taskId), notificationBuilder.build())
             Result.success()
         } catch (_: SecurityException) {
             Result.success()
@@ -64,6 +69,20 @@ class ReminderWorker(
             ) == PackageManager.PERMISSION_GRANTED
     }
 
+    private fun createContentIntent(taskId: Long): PendingIntent? {
+        val launchIntent = applicationContext.packageManager
+            .getLaunchIntentForPackage(applicationContext.packageName)
+            ?.apply { addFlags(ReminderNotification.launchIntentFlags) }
+            ?: return null
+
+        return PendingIntent.getActivity(
+            applicationContext,
+            notificationId(taskId),
+            launchIntent,
+            ReminderNotification.pendingIntentFlags
+        )
+    }
+
     private fun notificationId(taskId: Long): Int {
         return (taskId xor (taskId ushr 32)).toInt()
     }
@@ -75,4 +94,11 @@ class ReminderWorker(
         private const val CHANNEL_ID = "chrona_reminders"
         private const val CHANNEL_NAME = "Chrona reminders"
     }
+}
+
+internal object ReminderNotification {
+    const val launchIntentFlags: Int = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+    const val pendingIntentFlags: Int = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+
+    fun isValidTaskId(taskId: Long): Boolean = taskId >= 0
 }
