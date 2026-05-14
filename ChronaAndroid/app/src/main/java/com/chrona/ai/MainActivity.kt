@@ -11,6 +11,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
+import com.chrona.ai.api.ApiSettingsStore
+import com.chrona.ai.api.OpenAiCompatibleScheduleParser
+import com.chrona.ai.api.ScheduleParseService
 import com.chrona.ai.data.AppDatabase
 import com.chrona.ai.data.ScheduleRepository
 import com.chrona.ai.parser.RuleBasedTaskParser
@@ -25,7 +28,14 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val context = LocalContext.current.applicationContext
-            val parser = remember { RuleBasedTaskParser() }
+            val settingsStore = remember { ApiSettingsStore(context) }
+            val parseService = remember {
+                ScheduleParseService(
+                    settingsProvider = { settingsStore.load() },
+                    remoteParser = OpenAiCompatibleScheduleParser(),
+                    fallbackParser = RuleBasedTaskParser()
+                )
+            }
             val repository = remember {
                 val dao = AppDatabase.get(context).scheduleTaskDao()
                 ScheduleRepository(
@@ -41,7 +51,8 @@ class MainActivity : ComponentActivity() {
 
             ChronaTheme {
                 ChronaApp(
-                    parser = parser,
+                    parseService = parseService,
+                    apiSettingsStore = settingsStore,
                     repository = repository,
                     onRequestNotificationPermission = {
                         if (
