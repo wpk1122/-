@@ -28,7 +28,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -42,6 +41,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.chrona.ai.R
 import com.chrona.ai.data.ScheduleRepository
 import com.chrona.ai.data.ScheduleTask
@@ -61,13 +61,15 @@ private const val DefaultPrompt = "明天提醒我拿快递，晚上健身，周
 fun ChronaApp(
     parser: TaskParser,
     repository: ScheduleRepository,
+    onRequestNotificationPermission: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val tasks by repository.observeTasks().collectAsState(initial = emptyList())
+    val tasks by repository.observeTasks().collectAsStateWithLifecycle(initialValue = emptyList())
     val coroutineScope = rememberCoroutineScope()
     var input by remember { mutableStateOf(DefaultPrompt) }
     var parsedTasks by remember { mutableStateOf<List<ParsedTask>>(emptyList()) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
+    var isSaving by remember { mutableStateOf(false) }
 
     Surface(
         modifier = modifier.fillMaxSize(),
@@ -91,6 +93,7 @@ fun ChronaApp(
                         input = it
                         statusMessage = null
                     },
+                    enabled = !isSaving,
                     onParse = {
                         parsedTasks = parser.parse(input)
                         statusMessage = if (parsedTasks.isEmpty()) {
@@ -119,12 +122,26 @@ fun ChronaApp(
                     Button(
                         onClick = {
                             coroutineScope.launch {
-                                parsedTasks.forEach { repository.addParsedTask(it) }
-                                val savedCount = parsedTasks.size
-                                parsedTasks = emptyList()
-                                statusMessage = "已加入 $savedCount 条日程。"
+                                val tasksToSave = parsedTasks
+                                if (tasksToSave.isEmpty()) return@launch
+
+                                isSaving = true
+                                try {
+                                    tasksToSave.forEach { repository.addParsedTask(it) }
+                                    val hasTimedTask = tasksToSave.any { it.startAt != null }
+                                    parsedTasks = emptyList()
+                                    statusMessage = "已加入 ${tasksToSave.size} 条日程。"
+                                    if (hasTimedTask) {
+                                        onRequestNotificationPermission()
+                                    }
+                                } catch (_: Exception) {
+                                    statusMessage = "保存失败，请检查后重试"
+                                } finally {
+                                    isSaving = false
+                                }
                             }
                         },
+                        enabled = !isSaving,
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(8.dp)
                     ) {
@@ -147,14 +164,22 @@ fun ChronaApp(
                         task = task,
                         onDone = {
                             coroutineScope.launch {
-                                repository.markDone(task.id)
-                                statusMessage = "已完成：${task.title}"
+                                try {
+                                    repository.markDone(task.id)
+                                    statusMessage = "已完成：${task.title}"
+                                } catch (_: Exception) {
+                                    statusMessage = "完成失败，请稍后重试"
+                                }
                             }
                         },
                         onDelete = {
                             coroutineScope.launch {
-                                repository.delete(task.id)
-                                statusMessage = "已删除：${task.title}"
+                                try {
+                                    repository.delete(task.id)
+                                    statusMessage = "已删除：${task.title}"
+                                } catch (_: Exception) {
+                                    statusMessage = "删除失败，请稍后重试"
+                                }
                             }
                         }
                     )
@@ -178,7 +203,7 @@ private fun ChronaHeader() {
     ) {
         Image(
             painter = painterResource(id = R.drawable.chrona_character),
-            contentDescription = "Chrona",
+            contentDescription = null,
             contentScale = ContentScale.Crop,
             modifier = Modifier
                 .size(64.dp)
@@ -212,6 +237,7 @@ private fun ChronaHeader() {
 private fun InputSection(
     input: String,
     onInputChange: (String) -> Unit,
+    enabled: Boolean,
     onParse: () -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -229,7 +255,7 @@ private fun InputSection(
         )
         ElevatedButton(
             onClick = onParse,
-            enabled = input.isNotBlank(),
+            enabled = enabled && input.isNotBlank(),
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(8.dp)
         ) {
