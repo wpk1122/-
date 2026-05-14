@@ -41,7 +41,7 @@ $androidProject = Join-Path $ProjectRoot "ChronaAndroid"
 $gradleExitCode = 0
 Push-Location -LiteralPath $androidProject
 try {
-    & $gradle ":app:assembleDebug" ":app:testDebugUnitTest"
+    & $gradle "clean" ":app:assembleDebug" ":app:testDebugUnitTest"
     $gradleExitCode = $LASTEXITCODE
 }
 finally {
