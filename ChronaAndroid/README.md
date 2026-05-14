@@ -16,10 +16,11 @@ The script installs Gradle, Android SDK command-line tools, and a project-local 
 
 - One-line Chinese schedule input.
 - Rule-based local parsing.
+- Optional user-provided OpenAI-compatible API settings with local parser fallback.
 - User confirmation before saving.
 - Room local persistence.
 - WorkManager reminder scheduling and cancellation.
-- Compose UI using the provided Chrona character asset.
+- Compose UI using split Chrona character assets.
 
 ## Debug APK
 
@@ -30,4 +31,5 @@ After a successful build:
 ## Notes
 
 - Android instrumentation tests require a connected device or emulator.
+- API settings are stored locally on the device. If no API is configured, Chrona uses the local rule-based parser.
 - The project path may contain Chinese characters; Gradle is configured with `android.overridePathCheck=true` for this workspace.
