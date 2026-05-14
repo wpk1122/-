@@ -10,11 +10,14 @@ interface ScheduleTaskDao {
     @Insert
     suspend fun insert(task: ScheduleTask): Long
 
-    @Query("SELECT * FROM schedule_tasks WHERE status != 'DELETED' ORDER BY COALESCE(startAt, createdAt) ASC")
+    @Query("SELECT * FROM schedule_tasks WHERE status = 'PENDING' ORDER BY COALESCE(startAt, createdAt) ASC")
     fun observeActiveTasks(): Flow<List<ScheduleTask>>
 
-    @Query("UPDATE schedule_tasks SET status = :status, updatedAt = :updatedAt WHERE id = :taskId")
-    suspend fun updateStatus(taskId: Long, status: TaskStatus, updatedAt: Long)
+    @Query("UPDATE schedule_tasks SET status = 'DONE', updatedAt = :updatedAt WHERE id = :taskId AND status = 'PENDING'")
+    suspend fun markDone(taskId: Long, updatedAt: Long): Int
+
+    @Query("UPDATE schedule_tasks SET status = 'DELETED', updatedAt = :updatedAt WHERE id = :taskId AND status != 'DELETED'")
+    suspend fun markDeleted(taskId: Long, updatedAt: Long): Int
 
     @Query("SELECT * FROM schedule_tasks WHERE id = :taskId LIMIT 1")
     suspend fun getById(taskId: Long): ScheduleTask?
