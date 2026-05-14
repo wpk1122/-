@@ -60,25 +60,85 @@ function Move-SafeItem {
     Move-Item -LiteralPath $safeSource -Destination $safeDestination -Force
 }
 
-function Download-File {
+function Remove-SafeItem {
     param(
-        [Parameter(Mandatory = $true)][string]$Url,
-        [Parameter(Mandatory = $true)][string]$Destination
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$ToolsRoot
     )
 
-    if (-not (Test-Path -LiteralPath $Destination)) {
-        Invoke-WebRequest -Uri $Url -OutFile $Destination
+    if (Test-Path -LiteralPath $Path) {
+        $safePath = Assert-InToolsDirectory -Path $Path -ToolsRoot $ToolsRoot
+        Remove-Item -LiteralPath $safePath -Force
     }
 }
 
-function Test-ValidJavaHome {
-    param([string]$JavaHome)
+function Download-File {
+    param(
+        [Parameter(Mandatory = $true)][string]$Url,
+        [Parameter(Mandatory = $true)][string]$Destination,
+        [Parameter(Mandatory = $true)][string]$ToolsRoot
+    )
 
-    if ([string]::IsNullOrWhiteSpace($JavaHome)) {
-        return $false
+    if (-not (Test-Path -LiteralPath $Destination)) {
+        $safeDestination = Assert-InToolsDirectory -Path $Destination -ToolsRoot $ToolsRoot
+        $tempDestination = "$safeDestination.download"
+        Remove-SafeItem -Path $tempDestination -ToolsRoot $ToolsRoot
+        Invoke-WebRequest -Uri $Url -OutFile $tempDestination
+        Move-SafeItem -Source $tempDestination -Destination $safeDestination -ToolsRoot $ToolsRoot
+    }
+}
+
+function Add-PathEntryIfMissing {
+    param([Parameter(Mandatory = $true)][string]$PathEntry)
+
+    $pathEntries = $env:Path -split [System.IO.Path]::PathSeparator
+    $alreadyPresent = $pathEntries | Where-Object { $_ -eq $PathEntry } | Select-Object -First 1
+
+    if (-not $alreadyPresent) {
+        $env:Path = $PathEntry + [System.IO.Path]::PathSeparator + $env:Path
+    }
+}
+
+function Get-JavaMajorVersion {
+    param([Parameter(Mandatory = $true)][string]$JavaExe)
+
+    if (-not (Test-Path -LiteralPath $JavaExe)) {
+        return $null
     }
 
-    return Test-Path -LiteralPath (Join-Path $JavaHome "bin\java.exe")
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $versionOutput = & $JavaExe -version 2>&1
+        $javaExitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+
+    if ($javaExitCode -ne 0) {
+        return $null
+    }
+
+    $versionText = $versionOutput -join "`n"
+    $match = [regex]::Match($versionText, 'version "([^"]+)"')
+    if (-not $match.Success) {
+        return $null
+    }
+
+    $version = $match.Groups[1].Value
+    if ($version.StartsWith("1.")) {
+        return [int]($version.Split(".")[1])
+    }
+
+    return [int]($version.Split(".")[0])
+}
+
+function Test-CompatibleJava {
+    param([Parameter(Mandatory = $true)][string]$JavaExe)
+
+    $majorVersion = Get-JavaMajorVersion -JavaExe $JavaExe
+    return $null -ne $majorVersion -and $majorVersion -ge 17
 }
 
 function Expand-ZipIntoDirectory {
@@ -91,6 +151,26 @@ function Expand-ZipIntoDirectory {
     Remove-SafeDirectory -Path $Destination -ToolsRoot $ToolsRoot
     New-Item -ItemType Directory -Force -Path $Destination | Out-Null
     Expand-Archive -LiteralPath $ZipPath -DestinationPath $Destination -Force
+}
+
+function Expand-DownloadedZipIntoDirectory {
+    param(
+        [Parameter(Mandatory = $true)][string]$Url,
+        [Parameter(Mandatory = $true)][string]$ZipPath,
+        [Parameter(Mandatory = $true)][string]$Destination,
+        [Parameter(Mandatory = $true)][string]$ToolsRoot
+    )
+
+    Download-File -Url $Url -Destination $ZipPath -ToolsRoot $ToolsRoot
+
+    try {
+        Expand-ZipIntoDirectory -ZipPath $ZipPath -Destination $Destination -ToolsRoot $ToolsRoot
+    }
+    catch {
+        Remove-SafeItem -Path $ZipPath -ToolsRoot $ToolsRoot
+        Download-File -Url $Url -Destination $ZipPath -ToolsRoot $ToolsRoot
+        Expand-ZipIntoDirectory -ZipPath $ZipPath -Destination $Destination -ToolsRoot $ToolsRoot
+    }
 }
 
 $ProjectRoot = Resolve-TargetPath $ProjectRoot
@@ -107,8 +187,7 @@ $gradleBat = Join-Path $GradleRoot "bin\gradle.bat"
 if (-not (Test-Path -LiteralPath $gradleBat)) {
     $gradleZip = Join-Path $ToolsRoot "gradle-8.7-bin.zip"
     $gradleExtract = Join-Path $ToolsRoot "gradle-extract"
-    Download-File -Url "https://services.gradle.org/distributions/gradle-8.7-bin.zip" -Destination $gradleZip
-    Expand-ZipIntoDirectory -ZipPath $gradleZip -Destination $gradleExtract -ToolsRoot $ToolsRoot
+    Expand-DownloadedZipIntoDirectory -Url "https://services.gradle.org/distributions/gradle-8.7-bin.zip" -ZipPath $gradleZip -Destination $gradleExtract -ToolsRoot $ToolsRoot
     $extractedGradle = Join-Path $gradleExtract "gradle-8.7"
     Remove-SafeDirectory -Path $GradleRoot -ToolsRoot $ToolsRoot
     Move-SafeItem -Source $extractedGradle -Destination $GradleRoot -ToolsRoot $ToolsRoot
@@ -119,8 +198,7 @@ $sdkManager = Join-Path $CmdlineToolsLatest "bin\sdkmanager.bat"
 if (-not (Test-Path -LiteralPath $sdkManager)) {
     $cmdlineZip = Join-Path $ToolsRoot "commandlinetools-win-11076708_latest.zip"
     $cmdlineExtract = Join-Path $ToolsRoot "cmdline-tools-extract"
-    Download-File -Url "https://dl.google.com/android/repository/commandlinetools-win-11076708_latest.zip" -Destination $cmdlineZip
-    Expand-ZipIntoDirectory -ZipPath $cmdlineZip -Destination $cmdlineExtract -ToolsRoot $ToolsRoot
+    Expand-DownloadedZipIntoDirectory -Url "https://dl.google.com/android/repository/commandlinetools-win-11076708_latest.zip" -ZipPath $cmdlineZip -Destination $cmdlineExtract -ToolsRoot $ToolsRoot
     $extractedCmdlineTools = Join-Path $cmdlineExtract "cmdline-tools"
     Remove-SafeDirectory -Path $CmdlineToolsLatest -ToolsRoot $ToolsRoot
     Move-SafeItem -Source $extractedCmdlineTools -Destination $CmdlineToolsLatest -ToolsRoot $ToolsRoot
@@ -128,14 +206,30 @@ if (-not (Test-Path -LiteralPath $sdkManager)) {
 }
 
 $localJava = Join-Path $JdkRoot "bin\java.exe"
-$javaCommand = Get-Command java -ErrorAction SilentlyContinue
-$hasInvalidJavaHome = -not [string]::IsNullOrWhiteSpace($env:JAVA_HOME) -and -not (Test-ValidJavaHome -JavaHome $env:JAVA_HOME)
+$compatibleJavaExe = $null
 
-if ((-not $javaCommand -or $hasInvalidJavaHome) -and -not (Test-Path -LiteralPath $localJava)) {
+if (Test-CompatibleJava -JavaExe $localJava) {
+    $compatibleJavaExe = $localJava
+}
+
+if (-not $compatibleJavaExe -and -not [string]::IsNullOrWhiteSpace($env:JAVA_HOME)) {
+    $javaHomeExe = Join-Path $env:JAVA_HOME "bin\java.exe"
+    if (Test-CompatibleJava -JavaExe $javaHomeExe) {
+        $compatibleJavaExe = $javaHomeExe
+    }
+}
+
+if (-not $compatibleJavaExe) {
+    $javaCommand = Get-Command java -ErrorAction SilentlyContinue
+    if ($javaCommand -and (Test-CompatibleJava -JavaExe $javaCommand.Source)) {
+        $compatibleJavaExe = $javaCommand.Source
+    }
+}
+
+if (-not $compatibleJavaExe) {
     $jdkZip = Join-Path $ToolsRoot "jdk-17.zip"
     $jdkExtract = Join-Path $ToolsRoot "jdk-17-extract"
-    Download-File -Url "https://api.adoptium.net/v3/binary/latest/17/ga/windows/x64/jdk/hotspot/normal/eclipse" -Destination $jdkZip
-    Expand-ZipIntoDirectory -ZipPath $jdkZip -Destination $jdkExtract -ToolsRoot $ToolsRoot
+    Expand-DownloadedZipIntoDirectory -Url "https://api.adoptium.net/v3/binary/latest/17/ga/windows/x64/jdk/hotspot/normal/eclipse" -ZipPath $jdkZip -Destination $jdkExtract -ToolsRoot $ToolsRoot
     $extractedJdk = Get-ChildItem -LiteralPath $jdkExtract -Directory | Select-Object -First 1
     if (-not $extractedJdk) {
         throw "Unable to locate extracted JDK directory."
@@ -143,11 +237,18 @@ if ((-not $javaCommand -or $hasInvalidJavaHome) -and -not (Test-Path -LiteralPat
     Remove-SafeDirectory -Path $JdkRoot -ToolsRoot $ToolsRoot
     Move-SafeItem -Source $extractedJdk.FullName -Destination $JdkRoot -ToolsRoot $ToolsRoot
     Remove-SafeDirectory -Path $jdkExtract -ToolsRoot $ToolsRoot
+    $compatibleJavaExe = $localJava
 }
 
-if (Test-Path -LiteralPath $localJava) {
+if (Test-CompatibleJava -JavaExe $localJava) {
     $env:JAVA_HOME = $JdkRoot
-    $env:Path = (Join-Path $JdkRoot "bin") + [System.IO.Path]::PathSeparator + $env:Path
+    Add-PathEntryIfMissing -PathEntry (Join-Path $JdkRoot "bin")
+}
+elseif ($compatibleJavaExe) {
+    $env:JAVA_HOME = Split-Path -Parent (Split-Path -Parent $compatibleJavaExe)
+}
+else {
+    throw "Unable to locate or install a Java 17+ runtime."
 }
 
 $env:ANDROID_HOME = $AndroidSdkRoot
@@ -160,6 +261,7 @@ elseif (-not $env:GRADLE_OPTS.Contains($pathCheckOverride)) {
     $env:GRADLE_OPTS = "$pathCheckOverride $env:GRADLE_OPTS"
 }
 Set-Item -Path "Env:ORG_GRADLE_PROJECT_android.overridePathCheck" -Value "true"
+Set-Item -Path "Env:ORG_GRADLE_PROJECT_android.useAndroidX" -Value "true"
 
 1..100 | ForEach-Object { "y" } | & $sdkManager --sdk_root=$AndroidSdkRoot --licenses | Out-Host
 if ($LASTEXITCODE -ne 0) {

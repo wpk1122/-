@@ -23,19 +23,31 @@ elseif (-not $env:GRADLE_OPTS.Contains($pathCheckOverride)) {
     $env:GRADLE_OPTS = "$pathCheckOverride $env:GRADLE_OPTS"
 }
 Set-Item -Path "Env:ORG_GRADLE_PROJECT_android.overridePathCheck" -Value "true"
+Set-Item -Path "Env:ORG_GRADLE_PROJECT_android.useAndroidX" -Value "true"
 
 if (Test-Path -LiteralPath $localJava) {
     $env:JAVA_HOME = $jdkRoot
-    $env:Path = (Join-Path $jdkRoot "bin") + [System.IO.Path]::PathSeparator + $env:Path
+    $jdkBin = Join-Path $jdkRoot "bin"
+    $pathEntries = $env:Path -split [System.IO.Path]::PathSeparator
+    $alreadyPresent = $pathEntries | Where-Object { $_ -eq $jdkBin } | Select-Object -First 1
+    if (-not $alreadyPresent) {
+        $env:Path = $jdkBin + [System.IO.Path]::PathSeparator + $env:Path
+    }
 }
 
 $gradle = Join-Path $toolsRoot "gradle-8.7\bin\gradle.bat"
 $androidProject = Join-Path $ProjectRoot "ChronaAndroid"
 
+$gradleExitCode = 0
 Push-Location -LiteralPath $androidProject
 try {
     & $gradle ":app:assembleDebug" ":app:testDebugUnitTest"
+    $gradleExitCode = $LASTEXITCODE
 }
 finally {
     Pop-Location
+}
+
+if ($gradleExitCode -ne 0) {
+    throw "Gradle build failed with exit code $gradleExitCode."
 }
