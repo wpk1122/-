@@ -4,8 +4,11 @@ import com.chrona.ai.parser.ParsedTask
 import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URL
+import java.time.Clock
 import java.time.LocalDateTime
+import java.time.ZoneId
 import java.time.format.DateTimeParseException
+import java.time.format.DateTimeFormatter
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -13,7 +16,10 @@ interface RemoteScheduleParser {
     suspend fun parse(input: String, settings: ApiSettings): List<ParsedTask>
 }
 
-class OpenAiCompatibleScheduleParser : RemoteScheduleParser {
+class OpenAiCompatibleScheduleParser(
+    private val clock: Clock = Clock.systemDefaultZone(),
+    private val zoneId: ZoneId = ZoneId.systemDefault()
+) : RemoteScheduleParser {
     override suspend fun parse(input: String, settings: ApiSettings): List<ParsedTask> {
         val connection = (URL(settings.chatCompletionsUrl).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
@@ -51,12 +57,18 @@ class OpenAiCompatibleScheduleParser : RemoteScheduleParser {
         }
     }
 
-    private fun buildRequestBody(input: String, settings: ApiSettings): String {
+    internal fun buildRequestBody(input: String, settings: ApiSettings): String {
+        val now = LocalDateTime.now(clock.withZone(zoneId))
+            .format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
         val systemPrompt = """
             You convert natural-language schedule requests into JSON only.
+            Current local date-time: $now
+            Time zone: ${zoneId.id}
+            Resolve relative dates from the current local date-time.
             Return a JSON array. Each item must include:
             title, startAt, endAt, confidenceNote, needsTimeConfirmation.
             startAt and endAt must be ISO local date-time strings or null.
+            If the user says tomorrow, tonight, next week, weekend, or another relative time, calculate it from the current local date-time above.
             Preserve the user's language in titles.
         """.trimIndent()
 

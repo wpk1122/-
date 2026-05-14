@@ -2,8 +2,12 @@ package com.chrona.ai.api
 
 import com.chrona.ai.parser.ParsedTask
 import com.chrona.ai.parser.TaskParser
+import java.time.Clock
+import java.time.Instant
 import java.time.LocalDateTime
+import java.time.ZoneId
 import kotlinx.coroutines.test.runTest
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -36,6 +40,28 @@ class OpenAiCompatibleScheduleParserTest {
             "https://api.example.com/v1/chat/completions",
             settings.chatCompletionsUrl
         )
+    }
+
+    @Test
+    fun requestBodyIncludesCurrentSystemTimeAndTimezone() {
+        val zone = ZoneId.of("Asia/Shanghai")
+        val parser = OpenAiCompatibleScheduleParser(
+            clock = Clock.fixed(Instant.parse("2026-05-14T02:30:00Z"), zone),
+            zoneId = zone
+        )
+
+        val body = parser.buildRequestBody(
+            input = "Remind me tomorrow afternoon",
+            settings = ApiSettings("https://api.example.com/v1", "key", "model")
+        )
+        val systemPrompt = JSONObject(body)
+            .getJSONArray("messages")
+            .getJSONObject(0)
+            .getString("content")
+
+        assertTrue(systemPrompt.contains("Current local date-time: 2026-05-14T10:30:00"))
+        assertTrue(systemPrompt.contains("Time zone: Asia/Shanghai"))
+        assertTrue(systemPrompt.contains("Resolve relative dates from the current local date-time"))
     }
 
     @Test
