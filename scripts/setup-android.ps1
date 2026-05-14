@@ -128,17 +128,55 @@ function Get-JavaMajorVersion {
 
     $version = $match.Groups[1].Value
     if ($version.StartsWith("1.")) {
-        return [int]($version.Split(".")[1])
+        $legacyParts = $version.Split(".")
+        $legacyMajor = 0
+        if ($legacyParts.Length -lt 2 -or -not [int]::TryParse($legacyParts[1], [ref]$legacyMajor)) {
+            return $null
+        }
+
+        return $legacyMajor
     }
 
-    return [int]($version.Split(".")[0])
+    $majorText = $version.Split(".")[0]
+    $majorVersion = 0
+    if (-not [int]::TryParse($majorText, [ref]$majorVersion)) {
+        return $null
+    }
+
+    return $majorVersion
 }
 
-function Test-CompatibleJava {
-    param([Parameter(Mandatory = $true)][string]$JavaExe)
+function Test-CompatibleJavaHome {
+    param([Parameter(Mandatory = $true)][string]$JavaHome)
+
+    $JavaExe = Join-Path $JavaHome "bin\java.exe"
+    $JavacExe = Join-Path $JavaHome "bin\javac.exe"
+    if (-not (Test-Path -LiteralPath $JavaExe) -or -not (Test-Path -LiteralPath $JavacExe)) {
+        return $false
+    }
 
     $majorVersion = Get-JavaMajorVersion -JavaExe $JavaExe
     return $null -ne $majorVersion -and $majorVersion -ge 17
+}
+
+function Get-CompatibleJavaHomeFromExecutable {
+    param([Parameter(Mandatory = $true)][string]$JavaExe)
+
+    if (-not (Test-Path -LiteralPath $JavaExe)) {
+        return $null
+    }
+
+    $javaParent = Split-Path -Parent $JavaExe
+    if ((Split-Path -Leaf $javaParent) -ne "bin") {
+        return $null
+    }
+
+    $candidateHome = Split-Path -Parent $javaParent
+    if (Test-CompatibleJavaHome -JavaHome $candidateHome) {
+        return $candidateHome
+    }
+
+    return $null
 }
 
 function Expand-ZipIntoDirectory {
@@ -205,28 +243,26 @@ if (-not (Test-Path -LiteralPath $sdkManager)) {
     Remove-SafeDirectory -Path $cmdlineExtract -ToolsRoot $ToolsRoot
 }
 
-$localJava = Join-Path $JdkRoot "bin\java.exe"
-$compatibleJavaExe = $null
+$compatibleJavaHome = $null
 
-if (Test-CompatibleJava -JavaExe $localJava) {
-    $compatibleJavaExe = $localJava
+if (Test-CompatibleJavaHome -JavaHome $JdkRoot) {
+    $compatibleJavaHome = $JdkRoot
 }
 
-if (-not $compatibleJavaExe -and -not [string]::IsNullOrWhiteSpace($env:JAVA_HOME)) {
-    $javaHomeExe = Join-Path $env:JAVA_HOME "bin\java.exe"
-    if (Test-CompatibleJava -JavaExe $javaHomeExe) {
-        $compatibleJavaExe = $javaHomeExe
+if (-not $compatibleJavaHome -and -not [string]::IsNullOrWhiteSpace($env:JAVA_HOME)) {
+    if (Test-CompatibleJavaHome -JavaHome $env:JAVA_HOME) {
+        $compatibleJavaHome = $env:JAVA_HOME
     }
 }
 
-if (-not $compatibleJavaExe) {
+if (-not $compatibleJavaHome) {
     $javaCommand = Get-Command java -ErrorAction SilentlyContinue
-    if ($javaCommand -and (Test-CompatibleJava -JavaExe $javaCommand.Source)) {
-        $compatibleJavaExe = $javaCommand.Source
+    if ($javaCommand) {
+        $compatibleJavaHome = Get-CompatibleJavaHomeFromExecutable -JavaExe $javaCommand.Source
     }
 }
 
-if (-not $compatibleJavaExe) {
+if (-not $compatibleJavaHome) {
     $jdkZip = Join-Path $ToolsRoot "jdk-17.zip"
     $jdkExtract = Join-Path $ToolsRoot "jdk-17-extract"
     Expand-DownloadedZipIntoDirectory -Url "https://api.adoptium.net/v3/binary/latest/17/ga/windows/x64/jdk/hotspot/normal/eclipse" -ZipPath $jdkZip -Destination $jdkExtract -ToolsRoot $ToolsRoot
@@ -237,18 +273,15 @@ if (-not $compatibleJavaExe) {
     Remove-SafeDirectory -Path $JdkRoot -ToolsRoot $ToolsRoot
     Move-SafeItem -Source $extractedJdk.FullName -Destination $JdkRoot -ToolsRoot $ToolsRoot
     Remove-SafeDirectory -Path $jdkExtract -ToolsRoot $ToolsRoot
-    $compatibleJavaExe = $localJava
+    $compatibleJavaHome = $JdkRoot
 }
 
-if (Test-CompatibleJava -JavaExe $localJava) {
-    $env:JAVA_HOME = $JdkRoot
-    Add-PathEntryIfMissing -PathEntry (Join-Path $JdkRoot "bin")
-}
-elseif ($compatibleJavaExe) {
-    $env:JAVA_HOME = Split-Path -Parent (Split-Path -Parent $compatibleJavaExe)
+if (Test-CompatibleJavaHome -JavaHome $compatibleJavaHome) {
+    $env:JAVA_HOME = $compatibleJavaHome
+    Add-PathEntryIfMissing -PathEntry (Join-Path $compatibleJavaHome "bin")
 }
 else {
-    throw "Unable to locate or install a Java 17+ runtime."
+    throw "Unable to locate or install a Java 17+ JDK."
 }
 
 $env:ANDROID_HOME = $AndroidSdkRoot
