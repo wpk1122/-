@@ -89,7 +89,6 @@ class RuleBasedTaskParser(
             segment.contains("健身") -> LocalTime.of(20, 0)
             segment.contains("快递") -> LocalTime.of(15, 0)
             segment.contains("报告") || segment.contains("写") -> LocalTime.of(14, 0)
-            detectDate(segment) != null -> LocalTime.of(9, 0)
             else -> null
         }
     }

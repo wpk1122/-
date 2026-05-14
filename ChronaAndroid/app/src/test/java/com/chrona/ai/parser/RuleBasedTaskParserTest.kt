@@ -46,4 +46,15 @@ class RuleBasedTaskParserTest {
         assertTrue(result.first().needsTimeConfirmation)
         assertNotNull(result.first().confidenceNote)
     }
+
+    @Test
+    fun keepsDateOnlyTaskAsPendingConfirmation() {
+        val result = parser.parse("明天开会")
+
+        assertEquals(1, result.size)
+        assertEquals("开会", result.first().title)
+        assertEquals(null, result.first().startAt)
+        assertEquals(null, result.first().endAt)
+        assertTrue(result.first().needsTimeConfirmation)
+    }
 }
