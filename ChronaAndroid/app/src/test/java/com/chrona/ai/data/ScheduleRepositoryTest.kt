@@ -37,6 +37,10 @@ class ScheduleRepositoryTest {
         assertEquals(clock.millis(), dao.inserted.single().createdAt)
         assertEquals(clock.millis(), dao.inserted.single().updatedAt)
         assertEquals(listOf(ScheduledReminder(42, "Submit report", Instant.parse("2026-05-15T06:00:00Z").toEpochMilli())), scheduler.scheduled)
+        assertEquals(1, dao.events.size)
+        assertEquals(42L, dao.events.single().taskId)
+        assertEquals(BehaviorEventType.CREATED.name, dao.events.single().type)
+        assertEquals(clock.millis(), dao.events.single().occurredAt)
     }
 
     @Test
@@ -51,6 +55,7 @@ class ScheduleRepositoryTest {
         assertEquals(null, dao.inserted.single().startAt)
         assertEquals(null, dao.inserted.single().endAt)
         assertEquals(emptyList<ScheduledReminder>(), scheduler.scheduled)
+        assertEquals(BehaviorEventType.CREATED.name, dao.events.single().type)
     }
 
     @Test
@@ -63,11 +68,15 @@ class ScheduleRepositoryTest {
 
         assertEquals(listOf(StatusTransition(5, clock.millis())), dao.markDoneCalls)
         assertEquals(listOf(5L), scheduler.cancelled)
+        assertEquals(1, dao.events.size)
+        assertEquals(5L, dao.events.single().taskId)
+        assertEquals(BehaviorEventType.COMPLETED.name, dao.events.single().type)
 
         dao.markDoneResult = 0
         repository.markDone(6)
 
         assertEquals(listOf(5L), scheduler.cancelled)
+        assertEquals(1, dao.events.size)
     }
 
     @Test
@@ -80,11 +89,15 @@ class ScheduleRepositoryTest {
 
         assertEquals(listOf(StatusTransition(9, clock.millis())), dao.markDeletedCalls)
         assertEquals(listOf(9L), scheduler.cancelled)
+        assertEquals(1, dao.events.size)
+        assertEquals(9L, dao.events.single().taskId)
+        assertEquals(BehaviorEventType.DELETED.name, dao.events.single().type)
 
         dao.markDeletedResult = 0
         repository.delete(10)
 
         assertEquals(listOf(9L), scheduler.cancelled)
+        assertEquals(1, dao.events.size)
     }
 
     private fun parsedTask(
@@ -111,7 +124,9 @@ private class FakeScheduleTaskDao(
     val inserted = mutableListOf<ScheduleTask>()
     val markDoneCalls = mutableListOf<StatusTransition>()
     val markDeletedCalls = mutableListOf<StatusTransition>()
+    val events = mutableListOf<TaskBehaviorEvent>()
     private val tasks = MutableStateFlow<List<ScheduleTask>>(emptyList())
+    private val behaviorEvents = MutableStateFlow<List<TaskBehaviorEvent>>(emptyList())
 
     override suspend fun insert(task: ScheduleTask): Long {
         inserted += task
@@ -131,6 +146,14 @@ private class FakeScheduleTaskDao(
     }
 
     override suspend fun getById(taskId: Long): ScheduleTask? = null
+
+    override suspend fun insertBehaviorEvent(event: TaskBehaviorEvent): Long {
+        events += event
+        behaviorEvents.value = events
+        return events.size.toLong()
+    }
+
+    override fun observeBehaviorEvents(): Flow<List<TaskBehaviorEvent>> = behaviorEvents
 }
 
 private class FakeReminderScheduler : ReminderScheduler {

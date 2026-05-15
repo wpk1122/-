@@ -10,8 +10,14 @@ interface ScheduleTaskDao {
     @Insert
     suspend fun insert(task: ScheduleTask): Long
 
+    @Insert
+    suspend fun insertBehaviorEvent(event: TaskBehaviorEvent): Long
+
     @Query("SELECT * FROM schedule_tasks WHERE status = 'PENDING' ORDER BY COALESCE(startAt, createdAt) ASC")
     fun observeActiveTasks(): Flow<List<ScheduleTask>>
+
+    @Query("SELECT * FROM task_behavior_events ORDER BY occurredAt DESC, id DESC")
+    fun observeBehaviorEvents(): Flow<List<TaskBehaviorEvent>>
 
     @Query("UPDATE schedule_tasks SET status = 'DONE', updatedAt = :updatedAt WHERE id = :taskId AND status = 'PENDING'")
     suspend fun markDone(taskId: Long, updatedAt: Long): Int

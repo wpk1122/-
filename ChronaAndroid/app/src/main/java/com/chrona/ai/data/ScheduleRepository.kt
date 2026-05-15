@@ -14,6 +14,8 @@ class ScheduleRepository(
 ) {
     fun observeTasks(): Flow<List<ScheduleTask>> = dao.observeActiveTasks()
 
+    fun observeBehaviorEvents(): Flow<List<TaskBehaviorEvent>> = dao.observeBehaviorEvents()
+
     suspend fun addParsedTask(parsedTask: ParsedTask): Long {
         val now = clock.millis()
         val startAtMillis = parsedTask.startAt?.atZone(zoneId)?.toInstant()?.toEpochMilli()
@@ -33,20 +35,37 @@ class ScheduleRepository(
         if (startAtMillis != null) {
             reminderScheduler.schedule(id, parsedTask.title, startAtMillis)
         }
+        logEvent(taskId = id, type = BehaviorEventType.CREATED, occurredAt = now)
         return id
     }
 
     suspend fun markDone(taskId: Long) {
-        val updated = dao.markDone(taskId, clock.millis())
+        val now = clock.millis()
+        val updated = dao.markDone(taskId, now)
         if (updated > 0) {
             reminderScheduler.cancel(taskId)
+            logEvent(taskId = taskId, type = BehaviorEventType.COMPLETED, occurredAt = now)
         }
     }
 
     suspend fun delete(taskId: Long) {
-        val updated = dao.markDeleted(taskId, clock.millis())
+        val now = clock.millis()
+        val updated = dao.markDeleted(taskId, now)
         if (updated > 0) {
             reminderScheduler.cancel(taskId)
+            logEvent(taskId = taskId, type = BehaviorEventType.DELETED, occurredAt = now)
+        }
+    }
+
+    private suspend fun logEvent(taskId: Long, type: BehaviorEventType, occurredAt: Long) {
+        runCatching {
+            dao.insertBehaviorEvent(
+                TaskBehaviorEvent(
+                    taskId = taskId,
+                    type = type.name,
+                    occurredAt = occurredAt
+                )
+            )
         }
     }
 }
