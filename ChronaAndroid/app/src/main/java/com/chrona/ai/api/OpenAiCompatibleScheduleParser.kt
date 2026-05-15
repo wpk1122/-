@@ -18,42 +18,29 @@ interface RemoteScheduleParser {
 
 class OpenAiCompatibleScheduleParser(
     private val clock: Clock = Clock.systemDefaultZone(),
-    private val zoneId: ZoneId = ZoneId.systemDefault()
+    private val zoneId: ZoneId = ZoneId.systemDefault(),
+    private val maxSegmentChars: Int = ScheduleInputPreprocessor.DefaultMaxChars,
+    private val maxOutputTokens: Int = 900,
+    private val requester: suspend (String, ApiSettings) -> String = ::requestModelContent
 ) : RemoteScheduleParser {
     override suspend fun parse(input: String, settings: ApiSettings): List<ParsedTask> {
-        val connection = (URL(settings.chatCompletionsUrl).openConnection() as HttpURLConnection).apply {
-            requestMethod = "POST"
-            connectTimeout = 15_000
-            readTimeout = 20_000
-            doOutput = true
-            setRequestProperty("Authorization", "Bearer ${settings.apiKey}")
-            setRequestProperty("Content-Type", "application/json; charset=utf-8")
-            setRequestProperty("Accept", "application/json")
-        }
-
-        try {
-            OutputStreamWriter(connection.outputStream, Charsets.UTF_8).use { writer ->
-                writer.write(buildRequestBody(input, settings))
-            }
-
-            val responseCode = connection.responseCode
-            val responseText = if (responseCode in 200..299) {
-                connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+        val segments = ScheduleInputPreprocessor.splitForApi(input, maxSegmentChars)
+        return segments.flatMap { segment ->
+            val responseText = requester(buildRequestBody(segment, settings), settings)
+            val trimmedResponse = responseText.trim()
+            val content = if (trimmedResponse.startsWith("{")) {
+                val response = JSONObject(trimmedResponse)
+                response
+                    .optJSONArray("choices")
+                    ?.getJSONObject(0)
+                    ?.getJSONObject("message")
+                    ?.getString("content")
+                    ?: trimmedResponse
             } else {
-                val errorText = connection.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
-                throw IllegalStateException("API request failed: $responseCode ${errorText.orEmpty()}")
+                trimmedResponse
             }
 
-            val response = JSONObject(responseText)
-            val content = response
-                .getJSONArray("choices")
-                .getJSONObject(0)
-                .getJSONObject("message")
-                .getString("content")
-
-            return parseTasksFromModelContent(content, input)
-        } finally {
-            connection.disconnect()
+            parseTasksFromModelContent(content, segment)
         }
     }
 
@@ -75,6 +62,7 @@ class OpenAiCompatibleScheduleParser(
         return JSONObject()
             .put("model", settings.model.trim())
             .put("temperature", 0)
+            .put("max_tokens", maxOutputTokens)
             .put(
                 "messages",
                 JSONArray()
@@ -128,5 +116,33 @@ class OpenAiCompatibleScheduleParser(
                 null
             }
         }
+    }
+}
+
+private suspend fun requestModelContent(requestBody: String, settings: ApiSettings): String {
+    val connection = (URL(settings.chatCompletionsUrl).openConnection() as HttpURLConnection).apply {
+        requestMethod = "POST"
+        connectTimeout = 15_000
+        readTimeout = 20_000
+        doOutput = true
+        setRequestProperty("Authorization", "Bearer ${settings.apiKey}")
+        setRequestProperty("Content-Type", "application/json; charset=utf-8")
+        setRequestProperty("Accept", "application/json")
+    }
+
+    try {
+        OutputStreamWriter(connection.outputStream, Charsets.UTF_8).use { writer ->
+            writer.write(requestBody)
+        }
+
+        val responseCode = connection.responseCode
+        if (responseCode in 200..299) {
+            return connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+        }
+
+        val errorText = connection.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+        throw IllegalStateException("API request failed: $responseCode ${errorText.orEmpty()}")
+    } finally {
+        connection.disconnect()
     }
 }

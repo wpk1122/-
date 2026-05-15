@@ -65,6 +65,72 @@ class OpenAiCompatibleScheduleParserTest {
     }
 
     @Test
+    fun requestBodyLimitsModelOutputTokens() {
+        val parser = OpenAiCompatibleScheduleParser()
+
+        val body = parser.buildRequestBody(
+            input = "明天提醒我拿快递",
+            settings = ApiSettings("https://api.example.com/v1", "key", "model")
+        )
+
+        assertEquals(900, JSONObject(body).getInt("max_tokens"))
+    }
+
+    @Test
+    fun preprocessorSplitsLongInputIntoStableSegments() {
+        val input = listOf(
+            "周一上午学习数学，下午整理资料，晚上运动",
+            "周二上午写报告，下午开会，晚上复盘",
+            "周三上午背单词，下午项目练习，晚上阅读"
+        ).joinToString("。")
+
+        val segments = ScheduleInputPreprocessor.splitForApi(input, maxChars = 28)
+
+        assertTrue(segments.size > 1)
+        assertTrue(segments.all { it.length <= 28 })
+        assertEquals(input.replace("。", ""), segments.joinToString("").replace("。", ""))
+    }
+
+    @Test
+    fun parseRequestsOneApiCallPerLongInputSegment() = runTest {
+        val requests = mutableListOf<String>()
+        val parser = OpenAiCompatibleScheduleParser(
+            maxSegmentChars = 32,
+            requester = { body, _ ->
+                requests += JSONObject(body)
+                    .getJSONArray("messages")
+                    .getJSONObject(1)
+                    .getString("content")
+                """
+                    [
+                      {
+                        "title": "Segment ${requests.size}",
+                        "startAt": null,
+                        "endAt": null,
+                        "confidenceNote": "segment",
+                        "needsTimeConfirmation": true
+                      }
+                    ]
+                """.trimIndent()
+            }
+        )
+        val input = listOf(
+            "周一上午学习数学，下午整理资料，晚上运动",
+            "周二上午写报告，下午开会，晚上复盘",
+            "周三上午背单词，下午项目练习，晚上阅读"
+        ).joinToString("。")
+
+        val result = parser.parse(
+            input = input,
+            settings = ApiSettings("https://api.example.com/v1", "key", "model")
+        )
+
+        assertTrue(requests.size > 1)
+        assertEquals(requests.size, result.size)
+        assertTrue(requests.all { it.length <= 32 })
+    }
+
+    @Test
     fun parsesOpenAiCompatibleJsonContentIntoParsedTasks() {
         val content = """
             [
