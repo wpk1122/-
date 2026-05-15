@@ -1,6 +1,6 @@
 # Chrona AI 智能日程助手
 
-Chrona 是一个 Android 原生 MVP，用来把自然语言转换成可保存、可提醒的日程任务。
+Chrona 是一个 Android 原生 AI 日程助手，用来把自然语言转换成可保存、可提醒、可复盘的日程任务。
 
 ## 项目思路
 
@@ -10,7 +10,10 @@ Chrona 是一个 Android 原生 MVP，用来把自然语言转换成可保存、
 - 未配置 API、API 失败、返回空结果时，自动回退到本地规则解析器。
 - 解析结果先给用户确认，再写入本地 Room 数据库。
 - 有明确时间的任务会通过 WorkManager 安排系统通知提醒。
-- UI 使用项目人物形象拆分出的头像、空状态图和局部装饰图，并提供本地 API 设置入口。
+- UI 已升级为角色融合场景：首页、对话、执行、总结四个入口。
+- 完成、删除、创建等行为会写入手机本地行为日志，用于生成真实使用总结。
+- 总结页会根据本地历史计算今日完成率、高效时段、过期待办和优化建议。
+- 长文本超过约 900 字时会自动分段请求 API，并限制输出 token，降低超时和上下文超限风险。
 
 ## 代码结构
 
@@ -18,6 +21,7 @@ Chrona 是一个 Android 原生 MVP，用来把自然语言转换成可保存、
 - `ChronaAndroid/app/src/main/java/com/chrona/ai/api/`：用户 API 设置、OpenAI-compatible 请求、AI/本地回退解析服务。
 - `ChronaAndroid/app/src/main/java/com/chrona/ai/parser/`：本地规则解析器。
 - `ChronaAndroid/app/src/main/java/com/chrona/ai/data/`：Room 数据库、DAO、仓库层。
+- `ChronaAndroid/app/src/main/java/com/chrona/ai/insights/`：本地行为洞察和总结建议。
 - `ChronaAndroid/app/src/main/java/com/chrona/ai/reminder/`：WorkManager 通知提醒。
 - `ChronaAndroid/app/src/main/java/com/chrona/ai/ui/`：Jetpack Compose 界面。
 - `scripts/`：项目本地 Android 构建环境安装与打包脚本。
@@ -42,6 +46,7 @@ powershell -ExecutionPolicy Bypass -File 'scripts/build-android.ps1'
 ```
 
 脚本会使用项目目录下的 `.tools` 本地 JDK、Gradle 和 Android SDK，并在打包前执行 `clean`，避免旧 dex 缓存导致安装包缺类。
+构建成功后会自动把 debug APK 复制到 `release/Chrona-debug.apk`。
 
 ## API 配置示例
 
@@ -54,9 +59,11 @@ Model: deepseek-v4-flash
 ```
 
 保存后输入一句自然语言日程，成功时界面会显示使用 API 解析；失败时会自动使用本地规则。
+复杂长文本会先分段，再逐段调用 API；未配置 API 时仍可离线使用本地规则。
 
 ## 验证记录
 
 - 已在 vivo S12 Pro 上通过 ADB 安装并启动验证。
 - 已修复启动闪退问题。
 - 已验证 debug 单元测试通过。
+- 已加入真实行为记录、本地总结洞察、长文本 API 稳定处理和四场景角色融合 UI。

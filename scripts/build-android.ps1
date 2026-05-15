@@ -51,3 +51,14 @@ finally {
 if ($gradleExitCode -ne 0) {
     throw "Gradle build failed with exit code $gradleExitCode."
 }
+
+$apkSource = Join-Path $androidProject "app\build\outputs\apk\debug\app-debug.apk"
+$releaseDir = Join-Path $ProjectRoot "release"
+$apkTarget = Join-Path $releaseDir "Chrona-debug.apk"
+if (-not (Test-Path -LiteralPath $apkSource)) {
+    throw "APK was not created at $apkSource."
+}
+
+New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
+Copy-Item -LiteralPath $apkSource -Destination $apkTarget -Force
+Write-Host "APK copied to $apkTarget"
