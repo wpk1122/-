@@ -1,8 +1,10 @@
 package com.chrona.ai.ui
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -15,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -53,6 +56,8 @@ import com.chrona.ai.api.ParseSource
 import com.chrona.ai.api.ScheduleParseService
 import com.chrona.ai.data.ScheduleRepository
 import com.chrona.ai.data.ScheduleTask
+import com.chrona.ai.insights.ScheduleInsight
+import com.chrona.ai.insights.ScheduleInsightCalculator
 import com.chrona.ai.parser.ParsedTask
 import java.time.Instant
 import java.time.LocalDate
@@ -73,7 +78,9 @@ fun ChronaApp(
     modifier: Modifier = Modifier
 ) {
     val tasks by repository.observeTasks().collectAsStateWithLifecycle(initialValue = emptyList())
+    val behaviorEvents by repository.observeBehaviorEvents().collectAsStateWithLifecycle(initialValue = emptyList())
     val coroutineScope = rememberCoroutineScope()
+    var selectedScene by remember { mutableStateOf(ChronaScene.HOME) }
     var input by remember { mutableStateOf(DefaultPrompt) }
     var parsedTasks by remember { mutableStateOf<List<ParsedTask>>(emptyList()) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
@@ -84,6 +91,14 @@ fun ChronaApp(
     var baseUrlInput by remember { mutableStateOf(apiSettings.baseUrl) }
     var apiKeyInput by remember { mutableStateOf(apiSettings.apiKey) }
     var modelInput by remember { mutableStateOf(apiSettings.model) }
+    val insight = remember(tasks, behaviorEvents) {
+        ScheduleInsightCalculator.calculate(
+            tasks = tasks,
+            events = behaviorEvents,
+            now = Instant.now(),
+            zoneId = ZoneId.systemDefault()
+        )
+    }
 
     fun saveApiSettings(settings: ApiSettings) {
         if (apiSettingsStore.save(settings)) {
@@ -102,6 +117,57 @@ fun ChronaApp(
         }
     }
 
+    fun parseInput() {
+        coroutineScope.launch {
+            isParsing = true
+            try {
+                val result = parseService.parse(input.trim())
+                parsedTasks = result.tasks
+                selectedScene = ChronaScene.CHAT
+                statusMessage = if (result.tasks.isEmpty()) {
+                    "还没有识别到日程，换一种说法试试。"
+                } else {
+                    val sourceText = when (result.source) {
+                        ParseSource.USER_API -> "已使用你的 API 解析"
+                        ParseSource.LOCAL_RULES -> if (apiSettings.isComplete) {
+                            "API 暂不可用，已使用本地规则解析"
+                        } else {
+                            "已使用本地规则解析"
+                        }
+                    }
+                    "$sourceText ${result.tasks.size} 条候选日程。"
+                }
+            } catch (_: Exception) {
+                statusMessage = "解析失败，已保留输入"
+            } finally {
+                isParsing = false
+            }
+        }
+    }
+
+    fun saveParsedTasks() {
+        coroutineScope.launch {
+            val tasksToSave = parsedTasks
+            if (tasksToSave.isEmpty()) return@launch
+
+            isSaving = true
+            try {
+                tasksToSave.forEach { repository.addParsedTask(it) }
+                val hasTimedTask = tasksToSave.any { it.startAt != null }
+                parsedTasks = emptyList()
+                selectedScene = ChronaScene.EXECUTE
+                statusMessage = "已加入 ${tasksToSave.size} 条日程。"
+                if (hasTimedTask) {
+                    onRequestNotificationPermission()
+                }
+            } catch (_: Exception) {
+                statusMessage = "保存失败，请检查后重试"
+            } finally {
+                isSaving = false
+            }
+        }
+    }
+
     Surface(
         modifier = modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.background
@@ -115,6 +181,23 @@ fun ChronaApp(
             item {
                 Spacer(modifier = Modifier.height(8.dp))
                 ChronaHeader()
+            }
+
+            item {
+                SceneSwitcher(
+                    selectedScene = selectedScene,
+                    onSceneSelected = { selectedScene = it }
+                )
+            }
+
+            item {
+                SceneHero(scene = selectedScene, insight = insight)
+            }
+
+            if (selectedScene == ChronaScene.SUMMARY) {
+                item {
+                    InsightPanel(insight = insight)
+                }
             }
 
             item {
@@ -265,6 +348,179 @@ fun ChronaApp(
             item {
                 Spacer(modifier = Modifier.height(18.dp))
             }
+        }
+    }
+}
+
+private enum class ChronaScene(
+    val label: String,
+    val imageRes: Int,
+    val title: String,
+    val message: String
+) {
+    HOME(
+        label = "首页",
+        imageRes = R.drawable.chrona_scene_home,
+        title = "早安，我来陪你整理今天",
+        message = "先写一句话，我会把它拆成能确认、能提醒、能复盘的日程。"
+    ),
+    CHAT(
+        label = "对话",
+        imageRes = R.drawable.chrona_scene_chat,
+        title = "把想法说出来，我来追问和确认",
+        message = "长文本会自动分批整理，AI 只负责理解，本地负责排期和兜底。"
+    ),
+    EXECUTE(
+        label = "执行",
+        imageRes = R.drawable.chrona_scene_execute,
+        title = "到点提醒，完成后我会记住节奏",
+        message = "完成、删除等动作会写入本地行为记录，用来生成真实建议。"
+    ),
+    SUMMARY(
+        label = "总结",
+        imageRes = R.drawable.chrona_scene_summary,
+        title = "今天的节奏，我帮你复盘",
+        message = "默认只在本地分析；以后开启 API 时也只发送压缩摘要。"
+    )
+}
+
+@Composable
+private fun SceneSwitcher(
+    selectedScene: ChronaScene,
+    onSceneSelected: (ChronaScene) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        ChronaScene.values().forEach { scene ->
+            if (scene == selectedScene) {
+                Button(
+                    onClick = { onSceneSelected(scene) },
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text(scene.label)
+                }
+            } else {
+                TextButton(
+                    onClick = { onSceneSelected(scene) },
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text(scene.label)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SceneHero(scene: ChronaScene, insight: ScheduleInsight) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Image(
+                painter = painterResource(id = scene.imageRes),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(16f / 9f)
+                    .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
+            )
+            Column(
+                modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 14.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(
+                    text = scene.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = scene.message,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (scene == ChronaScene.SUMMARY) {
+                    Text(
+                        text = "今日完成 ${insight.todayCompletedCount}/${insight.todayTaskCount} · 高效时段 ${insight.productiveHourLabel}",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.secondary
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun InsightPanel(insight: ScheduleInsight) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        SectionTitle(title = "本地总结")
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            InsightMetric(
+                label = "完成率",
+                value = "${insight.completionRatePercent}%",
+                modifier = Modifier.weight(1f)
+            )
+            InsightMetric(
+                label = "高效时段",
+                value = insight.productiveHourLabel,
+                modifier = Modifier.weight(1f)
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            InsightMetric(
+                label = "今日完成",
+                value = "${insight.todayCompletedCount}/${insight.todayTaskCount}",
+                modifier = Modifier.weight(1f)
+            )
+            InsightMetric(
+                label = "过期待办",
+                value = "${insight.overduePendingCount}",
+                modifier = Modifier.weight(1f)
+            )
+        }
+        insight.suggestions.forEach { suggestion ->
+            StatusMessage(message = suggestion)
+        }
+    }
+}
+
+@Composable
+private fun InsightMetric(label: String, value: String, modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier,
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(8.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = value,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
         }
     }
 }
