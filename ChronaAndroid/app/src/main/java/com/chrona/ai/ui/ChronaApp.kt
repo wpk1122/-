@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
@@ -533,14 +532,24 @@ private fun ChronaHeader() {
             .padding(top = 8.dp, bottom = 2.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Image(
-            painter = painterResource(id = R.drawable.chrona_avatar),
-            contentDescription = null,
-            contentScale = ContentScale.Crop,
+        Surface(
             modifier = Modifier
-                .size(64.dp)
-                .clip(CircleShape)
-        )
+                .size(56.dp),
+            color = MaterialTheme.colorScheme.primary,
+            shape = RoundedCornerShape(8.dp)
+        ) {
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier.fillMaxSize()
+            ) {
+                Text(
+                    text = "C",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onPrimary
+                )
+            }
+        }
         Spacer(modifier = Modifier.width(14.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
@@ -574,32 +583,19 @@ private fun InputSection(
     onParse: () -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Image(
-                painter = painterResource(id = R.drawable.chrona_accent),
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .size(62.dp)
-                    .clip(RoundedCornerShape(8.dp))
-            )
-            OutlinedTextField(
-                value = input,
-                onValueChange = onInputChange,
-                enabled = enabled,
-                modifier = Modifier
-                    .weight(1f)
-                    .height(132.dp),
-                label = { Text("想安排什么？") },
-                placeholder = { Text(DefaultPrompt) },
-                minLines = 3,
-                maxLines = 5,
-                shape = RoundedCornerShape(8.dp)
-            )
-        }
+        OutlinedTextField(
+            value = input,
+            onValueChange = onInputChange,
+            enabled = enabled,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(132.dp),
+            label = { Text("想安排什么？") },
+            placeholder = { Text(DefaultPrompt) },
+            minLines = 3,
+            maxLines = 5,
+            shape = RoundedCornerShape(8.dp)
+        )
         ElevatedButton(
             onClick = onParse,
             enabled = enabled && input.isNotBlank(),
@@ -869,14 +865,24 @@ private fun EmptyState() {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Image(
-            painter = painterResource(id = R.drawable.chrona_empty),
-            contentDescription = null,
-            contentScale = ContentScale.Crop,
+        Surface(
             modifier = Modifier
-                .size(112.dp)
-                .clip(CircleShape)
-        )
+                .size(84.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            shape = RoundedCornerShape(8.dp)
+        ) {
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier.fillMaxSize()
+            ) {
+                Text(
+                    text = "0",
+                    style = MaterialTheme.typography.displaySmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.secondary
+                )
+            }
+        }
         Text(
             text = "先输入一句话，让 Chrona 帮你拆成日程。",
             style = MaterialTheme.typography.bodyMedium,

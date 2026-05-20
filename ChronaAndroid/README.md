@@ -23,7 +23,7 @@ The script installs Gradle, Android SDK command-line tools, and a project-local 
 - Local behavior event logging for create, complete, and delete actions.
 - Local insights for completion rate, productive hour, overdue tasks, and suggestions.
 - WorkManager reminder scheduling and cancellation.
-- Compose UI with four companion scenes: home, AI chat, execution, and summary.
+- Compose UI with four no-character scenes: home, AI chat, execution, and summary. The character avatar is reserved for the launcher icon only.
 
 ## Debug APK
 
@@ -31,7 +31,7 @@ After a successful build:
 
 `app/build/outputs/apk/debug/app-debug.apk`
 
-The build script also copies the current package to:
+The build script also copies the current installable test package to:
 
 `../release/Chrona-debug.apk`
 
@@ -41,3 +41,4 @@ The build script also copies the current package to:
 - API settings are stored locally on the device. If no API is configured, Chrona uses the local rule-based parser.
 - Behavior insights are computed locally from Room data. API-based summaries should use compact statistics, not raw history.
 - The project path may contain Chinese characters; Gradle is configured with `android.overridePathCheck=true` for this workspace.
+- Store publishing requires a private release keystore. Without that keystore, this project can produce a debug-signed APK for testing and unsigned release artifacts for final signing.

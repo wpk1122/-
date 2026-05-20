@@ -10,7 +10,7 @@ Chrona 是一个 Android 原生 AI 日程助手，用来把自然语言转换成
 - 未配置 API、API 失败、返回空结果时，自动回退到本地规则解析器。
 - 解析结果先给用户确认，再写入本地 Room 数据库。
 - 有明确时间的任务会通过 WorkManager 安排系统通知提醒。
-- UI 已升级为角色融合场景：首页、对话、执行、总结四个入口。
+- UI 已整理为无人物的组件化界面：首页、对话、执行、总结四个入口使用抽象时间管理视觉；人物头像只保留在应用图标中。
 - 完成、删除、创建等行为会写入手机本地行为日志，用于生成真实使用总结。
 - 总结页会根据本地历史计算今日完成率、高效时段、过期待办和优化建议。
 - 长文本超过约 900 字时会自动分段请求 API，并限制输出 token，降低超时和上下文超限风险。
@@ -25,7 +25,7 @@ Chrona 是一个 Android 原生 AI 日程助手，用来把自然语言转换成
 - `ChronaAndroid/app/src/main/java/com/chrona/ai/reminder/`：WorkManager 通知提醒。
 - `ChronaAndroid/app/src/main/java/com/chrona/ai/ui/`：Jetpack Compose 界面。
 - `scripts/`：项目本地 Android 构建环境安装与打包脚本。
-- `release/Chrona-debug.apk`：当前调试安装包。
+- `release/Chrona-debug.apk`：当前可安装测试包。
 
 ## 安装包
 
@@ -35,7 +35,7 @@ Chrona 是一个 Android 原生 AI 日程助手，用来把自然语言转换成
 release/Chrona-debug.apk
 ```
 
-这是 debug 包，适合测试安装，不是正式商店签名包。
+这是 debug 签名包，适合直接安装测试；正式商店发布仍需要使用你的正式 keystore 生成签名包或上传 AAB。
 
 ## 构建方式
 
@@ -66,4 +66,4 @@ Model: deepseek-v4-flash
 - 已在 vivo S12 Pro 上通过 ADB 安装并启动验证。
 - 已修复启动闪退问题。
 - 已验证 debug 单元测试通过。
-- 已加入真实行为记录、本地总结洞察、长文本 API 稳定处理和四场景角色融合 UI。
+- 已加入真实行为记录、本地总结洞察、长文本 API 稳定处理和无人物组件化 UI；人物头像仅作为应用图标使用。
